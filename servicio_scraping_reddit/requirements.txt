@@ -1,0 +1,10 @@
+# Contenido para el archivo: servicio_scraping_reddit/requirements.txt
+
+fastapi>=0.100.0 # Framework web principal
+uvicorn[standard]>=0.20.0 # Servidor ASGI para FastAPI, [standard] incluye optimizaciones
+pydantic>=2.0.0 # Para validación de datos y modelos (usado intensivamente por FastAPI)
+pydantic-settings>=2.0.0 
+praw>=7.6.0 # Python Reddit API Wrapper, para interactuar con Reddit
+
+# Útil para manejar variables de entorno desde archivos .env (para API keys, etc.)
+python-dotenv>=0.20.0

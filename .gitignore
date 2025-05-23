@@ -1,0 +1,34 @@
+# Python bytecode y caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos Virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# Archivos .env (contienen secretos)
+.env
+*.env.local
+# Excepción: SÍ queremos versionar los archivos .env.example
+!*.env.example 
+
+# VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# Docker - specific to local overrides if you use them
+docker-compose.override.yml
+
+# macOS
+.DS_Store
+
+# Logs y archivos temporales
+*.log
+logs/

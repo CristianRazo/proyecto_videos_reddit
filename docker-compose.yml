@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  scraper_api:
+    build:
+      context: ./servicio_scraping_reddit
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./servicio_scraping_reddit/app:/app/app
+    env_file:
+      - .env
+    depends_on:
+      - redis
+
+  redis:
+    image: "redis:7-alpine"
+    ports:
+      - "6379:6379"
+    # volumes: <--- Sección eliminada o comentada si no se necesita persistencia
+    #   - redis_data:/data 
+    # command: redis-server --appendonly yes # El comando también podría ser opcional si no hay volumen
