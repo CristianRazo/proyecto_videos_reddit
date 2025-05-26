@@ -1,23 +1,72 @@
+# Contenido para el archivo: proyecto_videos_reddit/docker-compose.yml
+
 version: "3.9"
 
 services:
-  scraper_api:
+  scraper_api: # Servicio_ScrapingReddit
     build:
       context: ./servicio_scraping_reddit
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
     volumes:
-      - ./servicio_scraping_reddit/app:/app/app
+      - ./servicio_scraping_reddit/app:/app/app 
     env_file:
       - .env
     depends_on:
       - redis
+    container_name: scraper_api_service
+
+  text_processor_api: # Servicio_ProcesamientoTexto
+    build:
+      context: ./servicio_procesamiento_texto
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8000" 
+    volumes:
+      - ./servicio_procesamiento_texto/app:/app/app 
+    env_file:
+      - .env 
+    depends_on:
+      - redis 
+    container_name: text_processor_api_service
+
+  audio_api: # Nuevo: Servicio_Audio
+    build:
+      context: ./servicio_audio # Asume que crearás esta carpeta
+      dockerfile: Dockerfile      # Asume que tendrá su propio Dockerfile
+    ports:
+      - "8002:8000" # Mapea el puerto 8000 del contenedor al 8002 del host
+    volumes:
+      # Monta el código de la aplicación local en el contenedor para desarrollo
+      - ./servicio_audio/app:/app/app 
+      # Monta un volumen nombrado para el almacenamiento persistente de audios generados
+      # Esto mapea el volumen 'generated_audio_data' a '/app/generated_audios' dentro del contenedor,
+      # que es el AUDIO_STORAGE_PATH que definimos en config.py
+      - generated_audio_data:/app/generated_audios 
+      # (Opcional) Si usas un archivo de clave de servicio para Google Cloud:
+      # Monta tu archivo de clave JSON de Google Cloud en una ruta específica dentro del contenedor.
+      # Deberás tener este archivo en tu máquina local (ej. en la raíz del proyecto o una carpeta 'secrets').
+      # Y tu variable GOOGLE_APPLICATION_CREDENTIALS en el .env debe apuntar a esta ruta DENTRO del contenedor.
+      # Ejemplo: Si tu archivo local es './gcp-credentials.json'
+      # - ./gcp-credentials.json:/app/secrets/gcp-credentials.json:ro # :ro para solo lectura
+      - ./secrets/video-generator-project-82bf0abccf3d.json:/app/gcp_credentials/service_account_key.json:ro 
+    env_file:
+      - .env # Carga OPENAI_API_KEY, GOOGLE_APPLICATION_CREDENTIALS (como path), etc.
+    # depends_on:
+      # - redis # Si fuera a usar Celery en el futuro
+    container_name: audio_api_service
 
   redis:
     image: "redis:7-alpine"
     ports:
-      - "6379:6379"
-    # volumes: <--- Sección eliminada o comentada si no se necesita persistencia
-    #   - redis_data:/data 
-    # command: redis-server --appendonly yes # El comando también podría ser opcional si no hay volumen
+      - "6379:6379" 
+    # volumes:
+    #   - redis_data:/data # Para persistencia de Redis
+    container_name: redis_service
+
+# Define los volúmenes nombrados usados por los servicios
+volumes:
+  generated_audio_data: # Volumen para los audios generados por Servicio_Audio
+    # driver: local # Por defecto es 'local'
+  # redis_data: # Si decides persistir datos de Redis

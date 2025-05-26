@@ -1,0 +1,85 @@
+# Servicio de Generación de Audio (Servicio_Audio)
+
+## Descripción Corta
+
+Este microservicio es responsable de convertir texto a voz (Text-to-Speech, TTS). Ofrece dos funcionalidades principales:
+
+1.  **TTS Básico:** Convierte un bloque de texto proporcionado a un archivo de audio, manejando la división de textos largos ("chunking") y permitiendo la selección de proveedor TTS (Google Cloud TTS por defecto) y parámetros de voz.
+2.  **TTS para Guion de Video:** Recibe una estructura de guion de video completa (generalmente la salida del `Servicio_ProcesamientoTexto`), que incluye un guion narrativo completo opcional y una lista de escenas con sus textos, y genera archivos de audio para cada texto relevante utilizando internamente la funcionalidad de TTS básico.
+
+El servicio almacena los archivos de audio resultantes en un volumen persistente y devuelve rutas de acceso a estos archivos junto con metadatos como su duración.
+
+## Tecnologías Utilizadas
+
+* **Lenguaje:** Python 3.9+
+* **Framework API:** FastAPI
+* **Proveedor TTS Principal:** Google Cloud Text-to-Speech
+* **Manipulación de Audio:** Pydub (requiere `ffmpeg` o `libav` en el entorno de ejecución)
+* **Servidor ASGI:** Uvicorn
+* **Validación de Datos y Configuración:** Pydantic y Pydantic-Settings
+* **Contenerización:** Docker
+* **Orquestación (Desarrollo):** Docker Compose
+
+## API Endpoints
+
+El servicio expone los siguientes endpoints:
+
+### 1. TTS Básico
+* **`POST /api/v1/audio/tts/generate_basic`**:
+    * **Descripción:** Recibe un texto y parámetros de voz, genera un archivo de audio y devuelve su ruta y metadatos.
+    * **Cuerpo de la Solicitud (JSON):** Modelo `BasicTTSRequest` (campos: `texto_a_convertir`, `id_solicitud` (opc), `proveedor_tts` (opc, default "google"), `configuracion_voz` (opc)).
+    * **Respuesta Exitosa (JSON):** Modelo `BasicTTSResponse` (campos: `id_solicitud_procesada`, `ruta_audio_generado`, `duracion_audio_seg`, `formato_audio`, `metadata_tts`).
+
+### 2. TTS para Guion de Video
+* **`POST /api/v1/audio/tts/for_video_script`**:
+    * **Descripción:** Recibe una estructura de guion de video completa y genera archivos de audio para cada escena y, opcionalmente, para el guion completo.
+    * **Cuerpo de la Solicitud (JSON):** Modelo `VideoScriptTTSRequest` (campos: `id_proyecto`, `guion_narrativo_completo_es` (opc), `escenas` (lista), `configuracion_voz_global` (opc), `proveedor_tts_global` (opc)).
+    * **Respuesta Exitosa (JSON):** Modelo `VideoScriptTTSResponse` (campos: `id_proyecto`, `audio_guion_completo` (opc), `audios_escenas` (lista)).
+
+La documentación interactiva completa de la API (generada automáticamente por FastAPI) estará disponible en las siguientes rutas cuando el servicio esté en ejecución (asumiendo que se mapea al puerto `8002` del host):
+* **Swagger UI:** [`http://localhost:8002/docs`](http://localhost:8002/docs)
+* **ReDoc:** [`http://localhost:8002/redoc`](http://localhost:8002/redoc)
+
+## Prerrequisitos para Ejecutar
+
+* Docker instalado y en ejecución.
+* Docker Compose CLI plugin.
+* **Credenciales de Google Cloud Platform:** Si no se utiliza Application Default Credentials (ADC) en un entorno GCP, se necesita un archivo JSON de clave de cuenta de servicio de Google Cloud con la API Text-to-Speech habilitada.
+
+## Configuración del Entorno
+
+Este servicio requiere configuración para acceder a la API de Google Cloud TTS y para definir cómo se manejan los audios. Estas configuraciones se gestionan mediante variables de entorno, definidas en un archivo `.env` en la raíz del proyecto (`proyecto_videos_reddit/.env`) y cargadas por Docker Compose.
+
+**Variables de Entorno Clave (a definir en el `.env` raíz):**
+
+* **`GOOGLE_APPLICATION_CREDENTIALS`** (Opcional si ADC está disponible): Ruta *dentro del contenedor* al archivo JSON de clave de servicio de Google Cloud (ej. `/app/gcp_credentials/service_account_key.json`).
+* **`GOOGLE_TTS_DEFAULT_LANGUAGE_CODE`** (Opcional, default en código: "es-MX").
+* **`GOOGLE_TTS_DEFAULT_VOICE_NAME`** (Opcional, default en código: "es-MX-Standard-A").
+* **`AUDIO_OUTPUT_FORMAT`** (Opcional, default en código: "MP3").
+* **`AUDIO_OUTPUT_MP3_BITRATE`** (Opcional, default en código: 192000).
+* **`TTS_MAX_CHARS_PER_CHUNK`** (Opcional, default en código: 4500).
+* **`AUDIO_STORAGE_PATH`** (Opcional, default en código: "/app/generated_audios"): Ruta *dentro del contenedor* para guardar los audios.
+
+## Cómo Ejecutar el Servicio Localmente (para Desarrollo)
+
+Este servicio está diseñado para ser ejecutado como parte del conjunto de microservicios definidos en el archivo `docker-compose.yml` en la raíz del proyecto.
+
+1.  Asegúrate de haber configurado las variables de entorno necesarias en el archivo `.env` raíz. Si usas un archivo de clave para GCP, asegúrate de que esté montado correctamente en el contenedor según se define en `docker-compose.yml`.
+2.  Abre tu terminal y navega a la carpeta raíz del proyecto (`proyecto_videos_reddit/`).
+3.  Ejecuta: `docker compose up --build audio_api_service redis` (o `docker compose up --build` para todos).
+4.  El `Servicio_Audio` estará disponible en [`http://localhost:8002`](http://localhost:8002) (asumiendo el mapeo de puertos `8002:8000` en `docker-compose.yml`).
+
+## Cómo Probar el Servicio
+
+### Endpoint TTS Básico (`/api/v1/audio/tts/generate_basic`)
+```bash
+curl -X POST "http://localhost:8002/api/v1/audio/tts/generate_basic" \
+-H "Content-Type: application/json" \
+-d '{
+  "texto_a_convertir": "Este es un audio de prueba generado.",
+  "id_solicitud": "test_audio_basico_001",
+  "configuracion_voz": {
+    "idioma_codigo": "es-US",
+    "id_voz": "es-US-Studio-B" 
+  }
+}'

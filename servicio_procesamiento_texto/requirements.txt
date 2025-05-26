@@ -1,0 +1,6 @@
+fastapi>=0.100.0 # Framework web principal
+uvicorn[standard]>=0.20.0 # Servidor ASGI para FastAPI, [standard] incluye optimizaciones
+pydantic>=2.0.0 # Para validación de datos y modelos (usado intensivamente por FastAPI)
+pydantic-settings>=2.0.0 
+python-dotenv>=0.20.0
+openai>=1.0.0

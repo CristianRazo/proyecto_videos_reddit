@@ -1,0 +1,13 @@
+# Contenido para el archivo: proyecto_videos_reddit/servicio_audio/requirements.txt
+
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=0.20.0
+
+# Dependencias específicas para Google Cloud Text-to-Speech
+google-cloud-texttospeech>=2.14.0 # O la versión estable más reciente
+
+# Dependencia para manipulación de audio (concatenación, duración, exportación)
+pydub>=0.25.0 # O la versión estable más reciente

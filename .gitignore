@@ -32,3 +32,4 @@ docker-compose.override.yml
 # Logs y archivos temporales
 *.log
 logs/
+secrets/
