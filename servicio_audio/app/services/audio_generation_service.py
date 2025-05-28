@@ -81,12 +81,12 @@ def _dividir_texto_en_fragmentos(texto_completo: str, limite_caracteres: int) ->
 # --- Función Principal del Servicio de TTS Básico ---
 async def generar_audio_tts_basico(
     datos_solicitud: BasicTTSRequest
-) -> BasicTTSResponse: # Tipo de retorno es nuestro modelo Pydantic
+) -> BasicTTSResponse:
     print(f"Servicio Audio: Iniciando generación para id_solicitud: {datos_solicitud.id_solicitud or 'No provisto'}, id_proyecto: {datos_solicitud.id_proyecto or 'default_project'}")
 
     texto_original: str = datos_solicitud.texto_a_convertir
     id_solicitud_usar: str = datos_solicitud.id_solicitud or str(uuid.uuid4())
-    id_proyecto_usar: str = datos_solicitud.id_proyecto or "default_project" # Usar un default si no se provee
+    id_proyecto_usar: str = datos_solicitud.id_proyecto or "default_project"
 
     if datos_solicitud.proveedor_tts.lower() != "google":
         raise ValueError(f"Proveedor TTS '{datos_solicitud.proveedor_tts}' no soportado. Actualmente solo 'google' está implementado.")
@@ -102,29 +102,37 @@ async def generar_audio_tts_basico(
     
     voice_params = tts.VoiceSelectionParams(language_code=language_code_final, name=voice_name_final)
 
-    audio_encoding_final: tts.AudioEncoding = tts.AudioEncoding.MP3
+    audio_encoding_final: tts.AudioEncoding = tts.AudioEncoding.MP3 # Default
     output_format_setting = settings.AUDIO_OUTPUT_FORMAT.upper()
     if output_format_setting == "LINEAR16" or output_format_setting == "WAV":
         audio_encoding_final = tts.AudioEncoding.LINEAR16
     elif output_format_setting == "OGG_OPUS":
         audio_encoding_final = tts.AudioEncoding.OGG_OPUS
     
+    # --- AudioConfig SIMPLIFICADO: Sin intentar establecer mp3_bitrate explícitamente ---
     audio_config = tts.AudioConfig(
         audio_encoding=audio_encoding_final,
         speaking_rate=config_voz_req.velocidad if config_voz_req.velocidad is not None else 1.0,
-        pitch=config_voz_req.tono if config_voz_req.tono is not None else 0.0,
-        sample_rate_hertz= None # Dejar que Google elija el sample rate óptimo para MP3, o especificar si es WAV.
-                                 # Si es MP3, Google puede usar mp3_bitrate en lugar de sample_rate_hertz
-                                 # para controlar la calidad si el audio_encoding es MP3.
-                                 # mp3_bitrate=settings.AUDIO_OUTPUT_MP3_BITRATE # Descomentar si audio_encoding_final es MP3
+        pitch=config_voz_req.tono if config_voz_req.tono is not None else 0.0
+        # sample_rate_hertz se puede añadir aquí si audio_encoding_final es LINEAR16 y quieres controlarlo
+        # Para MP3, Google determina la mejor sample_rate_hertz basada en su modelo de voz.
     )
-    if audio_encoding_final == tts.AudioEncoding.MP3:
-        audio_config.mp3_bitrate = settings.AUDIO_OUTPUT_MP3_BITRATE
-
+    # ----------------------------------------------------------------------------------
 
     print(f"Servicio Audio: Config TTS - Voz: {voice_name_final}, Idioma: {language_code_final}, Encoding API: {audio_encoding_final.name}")
-    print(f"Servicio Audio: Texto original (len: {len(texto_original)}): '{texto_original[:100]}'")
+    # ... (resto de la función: chunking, llamada a synthesize_speech, concatenación, guardado en subcarpeta,
+    #      cálculo de duración, y construcción de BasicTTSResponse como en la última versión completa que te di) ...
 
+    # ... (Aquí va toda la lógica de chunking, bucle de synthesize_speech, concatenación con pydub, 
+    #      guardado de archivo en subcarpeta de proyecto, y cálculo de duración) ...
+
+    # Asumimos que las siguientes variables están correctamente pobladas por la lógica anterior:
+    # - ruta_completa_archivo_salida: str (ej. /app/generated_audios/proyecto_id/solicitud_id.mp3)
+    # - duracion_final_seg: float
+    # - final_output_format_lower: str (ej. "mp3")
+    # - fragmentos_de_texto: List[str] (para metadata.numero_fragmentos)
+
+    # ----- INICIO: Lógica de TTS, concatenación y guardado (de la versión completa anterior) -----
     fragmentos_de_texto = _dividir_texto_en_fragmentos(texto_original, settings.TTS_MAX_CHARS_PER_CHUNK)
     if not fragmentos_de_texto:
         raise ValueError("El texto para convertir a audio está vacío o es inválido después de la limpieza.")
@@ -160,18 +168,17 @@ async def generar_audio_tts_basico(
     if not audio_final_segment:
         raise ValueError("No se pudo procesar el contenido de audio después de la síntesis.")
 
-    # --- Lógica de Almacenamiento de Audio con Subcarpeta de Proyecto ---
-    directorio_proyecto_audio = os.path.join(settings.AUDIO_STORAGE_PATH, id_proyecto_usar) # Usa id_proyecto_usar
-    os.makedirs(directorio_proyecto_audio, exist_ok=True) # Crea la subcarpeta del proyecto
+    directorio_proyecto_audio = os.path.join(settings.AUDIO_STORAGE_PATH, id_proyecto_usar)
+    os.makedirs(directorio_proyecto_audio, exist_ok=True)
 
     final_output_format_lower = settings.AUDIO_OUTPUT_FORMAT.lower()
     nombre_archivo_salida = f"{id_solicitud_usar}.{final_output_format_lower}"
-    # Guardar en la subcarpeta del proyecto
     ruta_completa_archivo_salida = os.path.join(directorio_proyecto_audio, nombre_archivo_salida) 
 
     print(f"Servicio Audio: Exportando audio final a: {ruta_completa_archivo_salida} en formato {final_output_format_lower}")
     try:
         if final_output_format_lower == "mp3":
+            # Usamos el bitrate de settings si está definido y es MP3
             audio_final_segment.export(ruta_completa_archivo_salida, format="mp3", bitrate=f"{settings.AUDIO_OUTPUT_MP3_BITRATE // 1000}k")
         elif final_output_format_lower == "wav":
             audio_final_segment.export(ruta_completa_archivo_salida, format="wav")
@@ -185,18 +192,20 @@ async def generar_audio_tts_basico(
         raise ValueError(f"Error al guardar el archivo de audio procesado: {e}. Verifica dependencias como ffmpeg.")
         
     duracion_final_seg = round(len(audio_final_segment) / 1000.0, 2)
-    print(f"Servicio Audio: Duración del audio final: {duracion_final_seg}s")
+    # ----- FIN: Lógica de TTS, concatenación y guardado -----
 
-    # --- Construcción de la URL/Ruta para la Respuesta ---
-    # La ruta devuelta es la ruta completa dentro del contenedor, incluyendo la subcarpeta del proyecto.
-    # Esta es la que `StaticFiles` usará para encontrar el archivo si la URL base es correcta.
-    ruta_audio_respuesta = ruta_completa_archivo_salida 
+    # Construcción de la URL/Ruta para la Respuesta
+    # Si AUDIO_BASE_URL está configurada y es una URL HTTP válida
+    url_audio_respuesta: str
+    if settings.AUDIO_BASE_URL and settings.AUDIO_BASE_URL.startswith(("http://", "https://")):
+        base_url = settings.AUDIO_BASE_URL.rstrip('/')
+        nombre_relativo_archivo = f"{id_proyecto_usar}/{nombre_archivo_salida}" # Incluye subcarpeta del proyecto
+        url_audio_respuesta = f"{base_url}/{nombre_relativo_archivo.lstrip('/')}"
+    else: # Fallback a la ruta interna del contenedor si AUDIO_BASE_URL no es una URL completa
+        url_audio_respuesta = ruta_completa_archivo_salida
+        if settings.AUDIO_BASE_URL: # Si existe pero no es http, loguear advertencia
+             print(f"Servicio Audio: ADVERTENCIA - AUDIO_BASE_URL ('{settings.AUDIO_BASE_URL}') no parece una URL HTTP válida. Devolviendo ruta interna.")
 
-    # Si tu modelo de respuesta BasicTTSResponse espera una URL HTTP completa y tienes AUDIO_BASE_URL:
-    url_audio_completa_respuesta = f"{settings.AUDIO_BASE_URL.rstrip('/')}/{id_proyecto_usar}/{nombre_archivo_salida}"
-    # Asegúrate que BasicTTSResponse.ruta_audio_generado sea HttpUrl y que AUDIO_BASE_URL esté en config.
-    # Si BasicTTSResponse.ruta_audio_generado es solo 'str' para la ruta interna, entonces usa ruta_audio_respuesta.
-    # Basado en tu prueba exitosa anterior, usaremos url_audio_completa_respuesta.
 
     metadata_respuesta = TTSMetadataOutput(
         proveedor_usado="google",
@@ -207,11 +216,7 @@ async def generar_audio_tts_basico(
     
     respuesta_final = BasicTTSResponse(
         id_solicitud_procesada=id_solicitud_usar,
-        # Aquí decides si devuelves la URL completa o la ruta interna.
-        # Dado tu último log exitoso, parece que esperas una URL completa:
-        ruta_audio_generado=url_audio_completa_respuesta, # Asumiendo que BasicTTSResponse.ruta_audio_generado es HttpUrl y tienes AUDIO_BASE_URL
-        # Si no, y quieres la ruta interna:
-        # ruta_audio_generado=ruta_audio_respuesta, 
+        ruta_audio_generado=url_audio_respuesta, # Usamos la URL o ruta construida
         duracion_audio_seg=duracion_final_seg,
         formato_audio=final_output_format_lower,
         metadata_tts=metadata_respuesta
@@ -233,23 +238,24 @@ async def generar_audios_para_script_video(
     proveedor_a_usar = datos_script.proveedor_tts_global or "google"
     config_voz_a_usar = datos_script.configuracion_voz_global # Puede ser None, generar_audio_tts_basico usará sus defaults
 
-    # 1. (Opcional) Generar audio para el guion narrativo completo
-    if datos_script.guion_narrativo_completo_es:
-        print(f"  Servicio Audio: Procesando guion narrativo completo para el proyecto {id_proyecto}...")
-        try:
-            solicitud_tts_guion = BasicTTSRequest(
-                texto_a_convertir=datos_script.guion_narrativo_completo_es,
-                id_solicitud=f"{id_proyecto}_guion_completo_full", # ID único
-                id_proyecto=id_proyecto,
-                proveedor_tts=proveedor_a_usar,
-                configuracion_voz=config_voz_a_usar
-            )
-            audio_guion_completo_info = await generar_audio_tts_basico(solicitud_tts_guion) # Devuelve BasicTTSResponse
-            print(f"  Servicio Audio: Audio para guion completo generado: {audio_guion_completo_info.ruta_audio_generado}")
-        except ValueError as e:
-            print(f"  Servicio Audio: ERROR al generar audio para guion completo (proyecto {id_proyecto}): {e}")
-        except Exception as e:
-            print(f"  Servicio Audio: ERROR INESPERADO al generar audio para guion completo (proyecto {id_proyecto}): {e}")
+     # --- SECCIÓN COMENTADA/ELIMINADA: Generación de audio para el guion narrativo completo ---
+    # if datos_script.guion_narrativo_completo_es:
+    #     print(f"  Servicio Audio: Procesando guion narrativo completo para el proyecto {id_proyecto}...")
+    #     try:
+    #         solicitud_tts_guion = BasicTTSRequest(
+    #             texto_a_convertir=datos_script.guion_narrativo_completo_es,
+    #             id_solicitud=f"{id_proyecto}_guion_completo_full", 
+    #             id_proyecto=id_proyecto, 
+    #             proveedor_tts=proveedor_a_usar,
+    #             configuracion_voz=config_voz_a_usar
+    #         )
+    #         audio_guion_completo_info = await generar_audio_tts_basico(solicitud_tts_guion) 
+    #         print(f"  Servicio Audio: Audio para guion completo generado: {audio_guion_completo_info.ruta_audio_generado}")
+    #     except ValueError as e:
+    #         print(f"  Servicio Audio: ERROR al generar audio para guion completo (proyecto {id_proyecto}): {e}")
+    #     except Exception as e:
+    #         print(f"  Servicio Audio: ERROR INESPERADO al generar audio para guion completo (proyecto {id_proyecto}): {e}")
+    # --- FIN SECCIÓN COMENTADA/ELIMINADA ---
 
     # 2. Generar audio para cada segmento de cada escena
     print(f"  Servicio Audio: Procesando {len(datos_script.escenas)} escenas para el proyecto {id_proyecto}...")

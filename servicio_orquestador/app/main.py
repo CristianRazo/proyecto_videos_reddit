@@ -23,7 +23,7 @@ app = FastAPI(
 @app.post("/api/v1/workflows/start_video_creation", response_model=WorkflowStartResponse)
 async def start_video_creation_workflow(
     request_data: WorkflowStartRequest,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks 
 ):
     id_proyecto_usar = request_data.id_proyecto or str(uuid.uuid4())
     print(f"API Orquestador: Iniciando flujo para id_proyecto: {id_proyecto_usar}, URL: {request_data.reddit_url}")
@@ -33,44 +33,36 @@ async def start_video_creation_workflow(
             scrape_reddit_task.s(# type: ignore
                 reddit_url=str(request_data.reddit_url), 
                 id_proyecto=id_proyecto_usar,
-                num_comentarios=request_data.num_comentarios_scrape
+                num_comentarios=request_data.num_comentarios_scrape,
+                # Pasamos los nuevos parámetros de scraping
+                incluir_subcomentarios=request_data.incluir_subcomentarios_scrape,
+                numero_subcomentarios=request_data.numero_subcomentarios_scrape,
+                min_votos_subcomentarios=request_data.min_votos_subcomentarios_scrape,
+                # Pasamos el id_voz para que las tareas subsiguientes puedan usarlo
+                id_voz_preferida=request_data.id_voz_tts
             ), # type: ignore
             process_text_task.s(), # type: ignore
             group(
                 generate_audios_task.s(), # type: ignore
                 generate_visuals_task.s() # type: ignore
             )
+            # ... (futura tarea de ensamblaje) ...
         )
-
-        # Lanzamos el flujo de trabajo de forma asíncrona
+        
         task_dispatch_result: Optional[AsyncResult] = None
         try:
-            # Envolvemos apply_async en su propio try por si falla la comunicación con el broker
             task_dispatch_result = workflow.apply_async()
         except Exception as celery_dispatch_error:
-            print(f"API Orquestador: ERROR CRÍTICO al despachar la tarea a Celery para id_proyecto {id_proyecto_usar}: {celery_dispatch_error}")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, # O 500
-                detail={"tipo_error": "ERROR_CELERY_BROKER_NO_DISPONIBLE", "mensaje": "No se pudo comunicar con el sistema de tareas (broker)."}
-            )
+            # ... (manejo de error como estaba) ...
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail={"tipo_error": "ERROR_CELERY_BROKER_NO_DISPONIBLE", "mensaje": "No se pudo comunicar con el sistema de tareas (broker)."})
 
-        # Verificamos que tenemos un resultado y un ID
         if task_dispatch_result and task_dispatch_result.id:
-            workflow_dispatch_id = task_dispatch_result.id
-            print(f"API Orquestador: Flujo de trabajo para id_proyecto {id_proyecto_usar} despachado a Celery. ID de Tarea/Grupo: {workflow_dispatch_id}")
-            
-            return WorkflowStartResponse(
-                workflow_id=workflow_dispatch_id, 
-                id_proyecto=id_proyecto_usar,
-                message="Flujo de trabajo para la creación de video iniciado exitosamente."
-            )
+            # ... (retorno exitoso como estaba) ...
+            return WorkflowStartResponse(workflow_id=task_dispatch_result.id, id_proyecto=id_proyecto_usar, message="Flujo de trabajo para la creación de video iniciado exitosamente.")
         else:
-            # Este caso es muy anómalo si apply_async no lanzó excepción pero no devolvió un ID.
-            print(f"API Orquestador: Error - apply_async no devolvió un ID de tarea para id_proyecto {id_proyecto_usar}.")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={"tipo_error": "ERROR_DESPACHO_CELERY_SIN_ID", "mensaje": "El flujo de trabajo fue despachado pero no se obtuvo un ID de tarea."}
-            )
+            # ... (manejo de error como estaba) ...
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"tipo_error": "ERROR_DESPACHO_CELERY_SIN_ID", "mensaje": "El flujo de trabajo fue despachado pero no se obtuvo un ID de tarea."})
+
 
     except HTTPException as http_exc: # Re-lanzar HTTPExceptions que ya hemos manejado
         raise http_exc

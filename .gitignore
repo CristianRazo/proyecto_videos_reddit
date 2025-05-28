@@ -33,3 +33,4 @@ docker-compose.override.yml
 *.log
 logs/
 secrets/
+GENERATED_ASSETS/
