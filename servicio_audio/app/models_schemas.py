@@ -31,28 +31,21 @@ class VoiceConfigInput(BaseModel):
 class BasicTTSRequest(BaseModel):
     """Cuerpo de la solicitud para el endpoint de TTS básico."""
     texto_a_convertir: str = Field(..., min_length=1, description="Texto a convertir en audio.")
-    id_solicitud: Optional[str] = Field(default=None, description="ID opcional para trazar la solicitud.")
-    proveedor_tts: str = Field(
-        default="google", # Google Cloud TTS como proveedor por defecto
-        description="Proveedor de TTS a utilizar ('google', 'elevenlabs', etc.)."
-        # En el futuro, podría ser un Enum: Literal["google", "elevenlabs"]
-    )
+    id_solicitud: Optional[str] = Field(default=None, description="ID opcional para trazar la solicitud y nombrar el archivo.")
+    id_proyecto: Optional[str] = Field(default=None, description="ID del proyecto para organizar los archivos en subcarpetas.") # <--- NUEVO CAMPO
+    proveedor_tts: str = Field(default="google", description="Proveedor de TTS a utilizar.")
     configuracion_voz: Optional[VoiceConfigInput] = Field(default=None, description="Configuraciones opcionales para la voz.")
-    # Podríamos añadir un campo para el formato de audio deseado si no lo fijamos en el servicio
-    # formato_salida_audio: Optional[str] = Field(default="mp3", description="ej. 'mp3', 'wav'")
-
 
     class Config:
         json_schema_extra = {
             "example": {
-                "texto_a_convertir": "Hola mundo, esta es una prueba de audio generada por mi servicio.",
-                "id_solicitud": "audio_test_007",
+                "texto_a_convertir": "Hola mundo, esta es una prueba de audio.",
+                "id_solicitud": "audio_test_009",
+                "id_proyecto": "proyecto_demo_X", # Ejemplo de nuevo campo
                 "proveedor_tts": "google",
                 "configuracion_voz": {
-                    "id_voz": "es-MX-Standard-A", # Ejemplo de voz de Google para español de México
-                    "idioma_codigo": "es-MX",
-                    "velocidad": 1.0,
-                    "tono": 0.0
+                    "id_voz": "es-MX-Standard-A",
+                    "idioma_codigo": "es-MX"
                 }
             }
         }

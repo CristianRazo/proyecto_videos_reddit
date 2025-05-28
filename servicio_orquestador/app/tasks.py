@@ -1,0 +1,203 @@
+import httpx
+from celery.exceptions import Ignore 
+import json
+import asyncio # Para asyncio.run()
+from typing import Dict, Any, List
+
+from .celery_app import celery_app
+from .core.config import get_settings
+
+settings = get_settings()
+DEFAULT_HTTP_TIMEOUT = 60.0 
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def scrape_reddit_task(self, reddit_url: str, id_proyecto: str, num_comentarios: int = 10): # Síncrona
+    """
+    Tarea de Celery SÍNCRONA para llamar al Servicio_ScrapingReddit.
+    Ejecuta la lógica asíncrona internamente con asyncio.run().
+    """
+    print(f"TASK (SYNC WRAPPER): scrape_reddit_task iniciada para id_proyecto: {id_proyecto}, URL: {reddit_url}")
+
+    async def _actual_scrape_logic():
+        print(f"  TASK ASYNC CORE: scrape_reddit_task - Realizando llamada HTTP para id_proyecto: {id_proyecto}")
+        scraper_endpoint = f"{settings.SCRAPER_API_BASE_URL}/scrape/reddit"
+        payload = {
+            "url_post_reddit": reddit_url, "id_proyecto": id_proyecto,
+            "numero_comentarios": num_comentarios, "incluir_subcomentarios": True,
+            "numero_subcomentarios": 2, "min_votos_subcomentarios": 0
+        }
+        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+            response = await client.post(scraper_endpoint, json=payload)
+            response.raise_for_status() 
+            return response.json()
+
+    try:
+        resultado_scraper = asyncio.run(_actual_scrape_logic())
+        print(f"TASK (SYNC WRAPPER): scrape_reddit_task completada para id_proyecto: {id_proyecto}. Título: {resultado_scraper.get('titulo', 'N/A')[:30]}...")
+        return {"scraped_data": resultado_scraper, "id_proyecto": id_proyecto}
+    except httpx.HTTPStatusError as exc:
+        error_info = f"HTTPStatusError ({exc.response.status_code}) en scrape_reddit_task para id_proyecto {id_proyecto}: {exc.response.text[:200]}"
+        print(f"TASK ERROR: {error_info}")
+        if exc.response.status_code >= 500 or exc.response.status_code == 429:
+            raise self.retry(exc=Exception(error_info))
+        else:
+            raise ValueError(error_info)
+    except httpx.RequestError as exc:
+        error_info = f"RequestError en scrape_reddit_task para id_proyecto {id_proyecto}: {str(exc)[:200]}"
+        print(f"TASK ERROR: {error_info}")
+        raise self.retry(exc=Exception(error_info))
+    except Exception as exc:
+        error_info = f"Error inesperado en scrape_reddit_task para id_proyecto {id_proyecto}: {type(exc).__name__} - {str(exc)[:200]}"
+        print(f"TASK ERROR: {error_info}")
+        raise self.retry(exc=Exception(error_info))
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=120)
+def process_text_task(self, previous_result: Dict[str, Any]): # Síncrona
+    scraped_data = previous_result.get("scraped_data")
+    id_proyecto = previous_result.get("id_proyecto")
+
+    if not scraped_data or not id_proyecto:
+        error_msg = f"Faltan datos de scrape_reddit_task para process_text_task (id_proyecto: {id_proyecto or 'Desconocido'})"
+        print(f"TASK ERROR: {error_msg}")
+        raise ValueError(error_msg)
+
+    print(f"TASK (SYNC WRAPPER): process_text_task iniciada para id_proyecto: {id_proyecto}")
+
+    async def _actual_process_text_logic():
+        print(f"  TASK ASYNC CORE: process_text_task - Realizando llamada HTTP para id_proyecto: {id_proyecto}")
+        text_processor_endpoint = f"{settings.TEXT_PROCESSOR_API_BASE_URL}/text_processing/process_reddit_content"
+        payload = scraped_data 
+        async with httpx.AsyncClient(timeout=900.0) as client: # Timeout largo para IA
+            response = await client.post(text_processor_endpoint, json=payload)
+            response.raise_for_status()
+            return response.json()
+
+    try:
+        resultado_text_processing = asyncio.run(_actual_process_text_logic())
+        print(f"TASK (SYNC WRAPPER): process_text_task completada para id_proyecto: {id_proyecto}. Guion (primeros 30 chars): {resultado_text_processing.get('guion_narrativo_completo_es', '')[:30]}...")
+        return {"processed_text_data": resultado_text_processing, "id_proyecto": id_proyecto}
+    except httpx.HTTPStatusError as exc:
+        error_info = f"HTTPStatusError ({exc.response.status_code}) en process_text_task para id_proyecto {id_proyecto}: {exc.response.text[:200]}"
+        print(f"TASK ERROR: {error_info}")
+        if exc.response.status_code >= 500 or exc.response.status_code == 429:
+            raise self.retry(exc=Exception(error_info), countdown=120)
+        else:
+            raise ValueError(error_info)
+    except httpx.RequestError as exc:
+        error_info = f"RequestError en process_text_task para id_proyecto {id_proyecto}: {str(exc)[:200]}"
+        print(f"TASK ERROR: {error_info}")
+        raise self.retry(exc=Exception(error_info), countdown=120)
+    except Exception as exc:
+        error_info = f"Error inesperado en process_text_task para id_proyecto {id_proyecto}: {type(exc).__name__} - {str(exc)[:200]}"
+        print(f"TASK ERROR: {error_info}")
+        raise self.retry(exc=Exception(error_info), countdown=120)
+
+
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=180)
+def generate_audios_task(self, previous_result: Dict[str, Any]): # Síncrona
+    processed_text_data = previous_result.get("processed_text_data")
+    id_proyecto = previous_result.get("id_proyecto")
+
+    if not processed_text_data or not id_proyecto:
+        error_msg = f"Faltan datos de process_text_task para generate_audios_task (id_proyecto: {id_proyecto or 'Desconocido'})"
+        print(f"TASK ERROR: {error_msg}")
+        raise ValueError(error_msg)
+
+    print(f"TASK (SYNC WRAPPER): generate_audios_task iniciada para id_proyecto: {id_proyecto}")
+
+    async def _actual_generate_audios_logic():
+        print(f"  TASK ASYNC CORE: generate_audios_task - Realizando llamada HTTP para id_proyecto: {id_proyecto}")
+        escenas_para_audio = []
+        for escena_proc in processed_text_data.get("escenas", []):
+            segmentos_narrativos_input = []
+            for seg_narr_proc in escena_proc.get("segmentos_narrativos", []):
+                segmentos_narrativos_input.append({
+                    "tipo_segmento": seg_narr_proc.get("tipo_segmento"), "autor": seg_narr_proc.get("autor"),
+                    "texto_es": seg_narr_proc.get("texto_es"), "id_original_segmento": seg_narr_proc.get("id_original_segmento")
+                })
+            escenas_para_audio.append({"id_escena": escena_proc.get("id_escena"), "segmentos_narrativos": segmentos_narrativos_input})
+        audio_payload = {
+            "id_proyecto": id_proyecto,
+            "guion_narrativo_completo_es": processed_text_data.get("guion_narrativo_completo_es"),
+            "escenas": escenas_para_audio
+        }
+        audio_service_endpoint = f"{settings.AUDIO_API_BASE_URL}/audio/tts/for_video_script"
+        async with httpx.AsyncClient(timeout=900.0) as client: # Timeout largo para múltiples TTS
+            response = await client.post(audio_service_endpoint, json=audio_payload)
+            response.raise_for_status()
+            return response.json()
+
+    try:
+        resultado_audio_generation = asyncio.run(_actual_generate_audios_logic())
+        print(f"TASK (SYNC WRAPPER): generate_audios_task completada para id_proyecto: {id_proyecto}. {len(resultado_audio_generation.get('audios_por_escena', []))} audios de escena procesados.")
+        return {"audio_output": resultado_audio_generation, "id_proyecto": id_proyecto, "text_data_passthrough": processed_text_data}
+    except httpx.HTTPStatusError as exc:
+        error_info = f"HTTPStatusError ({exc.response.status_code}) en generate_audios_task para id_proyecto {id_proyecto}: {exc.response.text[:200]}"
+        print(f"TASK ERROR: {error_info}")
+        if exc.response.status_code >= 500 or exc.response.status_code == 429:
+            raise self.retry(exc=Exception(error_info), countdown=180)
+        else:
+            raise ValueError(error_info)
+    except httpx.RequestError as exc:
+        error_info = f"RequestError en generate_audios_task para id_proyecto {id_proyecto}: {str(exc)[:200]}"
+        print(f"TASK ERROR: {error_info}")
+        raise self.retry(exc=Exception(error_info), countdown=180)
+    except Exception as exc:
+        error_info = f"Error inesperado en generate_audios_task para id_proyecto {id_proyecto}: {type(exc).__name__} - {str(exc)[:200]}"
+        print(f"TASK ERROR: {error_info}")
+        raise self.retry(exc=Exception(error_info), countdown=180)
+
+
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=180)
+def generate_visuals_task(self, previous_result: Dict[str, Any]): # Síncrona
+    processed_text_data = previous_result.get("processed_text_data")
+    id_proyecto = previous_result.get("id_proyecto")
+
+    if not processed_text_data or not id_proyecto:
+        error_msg = f"Faltan datos de process_text_task para generate_visuals_task (id_proyecto: {id_proyecto or 'Desconocido'})"
+        print(f"TASK ERROR: {error_msg}")
+        raise ValueError(error_msg)
+
+    print(f"TASK (SYNC WRAPPER): generate_visuals_task iniciada para id_proyecto: {id_proyecto}")
+
+    async def _actual_generate_visuals_logic():
+        print(f"  TASK ASYNC CORE: generate_visuals_task - Realizando llamada HTTP para id_proyecto: {id_proyecto}")
+        escenas_para_visuales = []
+        for escena_proc in processed_text_data.get("escenas", []):
+            escenas_para_visuales.append({
+                "id_escena": escena_proc.get("id_escena"),
+                "palabras_clave_stock_escena": escena_proc.get("palabras_clave_stock_escena", [])
+            })
+        visuals_payload = {"id_proyecto": id_proyecto, "escenas": escenas_para_visuales}
+        visuals_service_endpoint = f"{settings.VISUAL_GENERATOR_API_BASE_URL}/visuals/fetch_stock_media"
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.post(visuals_service_endpoint, json=visuals_payload)
+            response.raise_for_status()
+            return response.json()
+
+    try:
+        resultado_visual_generation = asyncio.run(_actual_generate_visuals_logic())
+        print(f"TASK (SYNC WRAPPER): generate_visuals_task completada para id_proyecto: {id_proyecto}. {len(resultado_visual_generation.get('visuales_por_escena', []))} escenas con visuales procesadas.")
+        return {"visual_output": resultado_visual_generation, "id_proyecto": id_proyecto, "text_data_passthrough": processed_text_data}
+    except httpx.HTTPStatusError as exc:
+        error_info = f"HTTPStatusError ({exc.response.status_code}) en generate_visuals_task para id_proyecto {id_proyecto}: {exc.response.text[:200]}"
+        print(f"TASK ERROR: {error_info}")
+        if exc.response.status_code >= 500 or exc.response.status_code == 429:
+            raise self.retry(exc=Exception(error_info), countdown=180)
+        else:
+            raise ValueError(error_info)
+    except httpx.RequestError as exc:
+        error_info = f"RequestError en generate_visuals_task para id_proyecto {id_proyecto}: {str(exc)[:200]}"
+        print(f"TASK ERROR: {error_info}")
+        raise self.retry(exc=Exception(error_info), countdown=180)
+    except Exception as exc:
+        error_info = f"Error inesperado en generate_visuals_task para id_proyecto {id_proyecto}: {type(exc).__name__} - {str(exc)[:200]}"
+        print(f"TASK ERROR: {error_info}")
+        raise self.retry(exc=Exception(error_info), countdown=180)
+
+# (Futuro) Tarea de ensamblaje de video
+# @celery_app.task(bind=True)
+# def assemble_video_task(self, group_results: List[Dict[str, Any]], id_proyecto: str): # Síncrona
+#     # ... (lógica similar con asyncio.run si llama a un servicio async de ensamblaje) ...
+#     pass

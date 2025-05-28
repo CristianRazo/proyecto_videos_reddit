@@ -80,6 +80,6 @@ curl -X POST "http://localhost:8002/api/v1/audio/tts/generate_basic" \
   "id_solicitud": "test_audio_basico_001",
   "configuracion_voz": {
     "idioma_codigo": "es-US",
-    "id_voz": "es-US-Studio-B" 
+    "id_voz": "es-US-Wavenet-B" 
   }
 }'

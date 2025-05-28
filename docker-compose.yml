@@ -1,6 +1,3 @@
-# Contenido para el archivo: proyecto_videos_reddit/docker-compose.yml
-
-version: "3.9"
 
 services:
   scraper_api: # Servicio_ScrapingReddit
@@ -31,42 +28,83 @@ services:
       - redis 
     container_name: text_processor_api_service
 
-  audio_api: # Nuevo: Servicio_Audio
+  audio_api: # Servicio_Audio
     build:
-      context: ./servicio_audio # Asume que crearás esta carpeta
-      dockerfile: Dockerfile      # Asume que tendrá su propio Dockerfile
+      context: ./servicio_audio
+      dockerfile: Dockerfile
     ports:
-      - "8002:8000" # Mapea el puerto 8000 del contenedor al 8002 del host
+      - "8002:8000" 
     volumes:
-      # Monta el código de la aplicación local en el contenedor para desarrollo
       - ./servicio_audio/app:/app/app 
-      # Monta un volumen nombrado para el almacenamiento persistente de audios generados
-      # Esto mapea el volumen 'generated_audio_data' a '/app/generated_audios' dentro del contenedor,
-      # que es el AUDIO_STORAGE_PATH que definimos en config.py
-      - generated_audio_data:/app/generated_audios 
-      # (Opcional) Si usas un archivo de clave de servicio para Google Cloud:
-      # Monta tu archivo de clave JSON de Google Cloud en una ruta específica dentro del contenedor.
-      # Deberás tener este archivo en tu máquina local (ej. en la raíz del proyecto o una carpeta 'secrets').
-      # Y tu variable GOOGLE_APPLICATION_CREDENTIALS en el .env debe apuntar a esta ruta DENTRO del contenedor.
-      # Ejemplo: Si tu archivo local es './gcp-credentials.json'
-      # - ./gcp-credentials.json:/app/secrets/gcp-credentials.json:ro # :ro para solo lectura
+      # --- LÍNEA MODIFICADA/NUEVA para el bind mount ---
+      - ./GENERATED_ASSETS/audios:/app/generated_audios 
       - ./secrets/video-generator-project-82bf0abccf3d.json:/app/gcp_credentials/service_account_key.json:ro 
     env_file:
-      - .env # Carga OPENAI_API_KEY, GOOGLE_APPLICATION_CREDENTIALS (como path), etc.
-    # depends_on:
-      # - redis # Si fuera a usar Celery en el futuro
+      - .env 
     container_name: audio_api_service
 
+  visual_generator_api: # Servicio_GeneracionVisuales
+    build:
+      context: ./servicio_generacion_visuales
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8000" 
+    volumes:
+      - ./servicio_generacion_visuales/app:/app/app 
+      # --- LÍNEA MODIFICADA/NUEVA para el bind mount de visuales ---
+      - ./GENERATED_ASSETS/visuals:/app/generated_visuals 
+      # ^ Mapea tu carpeta local a la ruta interna del contenedor
+    env_file:
+      - .env 
+    container_name: visual_generator_api_service
+  
+  orchestrator_api:
+    build:
+      context: ./servicio_orquestador
+      dockerfile: Dockerfile
+    ports:
+      - "8004:8000"
+    volumes:
+      - ./servicio_orquestador/app:/app/app
+    env_file:
+      - .env
+    depends_on: # <--- SECCIÓN CORREGIDA
+      - redis
+      - scraper_api       # Nombre del servicio clave
+      - text_processor_api  # Nombre del servicio clave
+      - audio_api         # Nombre del servicio clave
+      - visual_generator_api # Nombre del servicio clave
+    container_name: orchestrator_api_service
+
+ # ...
+  orchestrator_worker:
+    build:
+      context: ./servicio_orquestador
+      dockerfile: Dockerfile
+    volumes:
+      - ./servicio_orquestador/app:/app/app
+    env_file:
+      - .env
+    # --- LÍNEA MODIFICADA ---
+    command: celery -A app.celery_app worker -l INFO -P gevent -c 50 # Usamos gevent y aumentamos concurrencia
+    depends_on:
+      - redis
+      - scraper_api # Mantén las dependencias para asegurar que los servicios estén nombrados en la red
+      - text_processor_api
+      - audio_api
+      - visual_generator_api
+    container_name: orchestrator_worker_service
+# ...
   redis:
     image: "redis:7-alpine"
     ports:
       - "6379:6379" 
     # volumes:
-    #   - redis_data:/data # Para persistencia de Redis
+    #   - redis_data:/data
     container_name: redis_service
 
 # Define los volúmenes nombrados usados por los servicios
 volumes:
-  generated_audio_data: # Volumen para los audios generados por Servicio_Audio
-    # driver: local # Por defecto es 'local'
+  generated_audio_data:  # Para Servicio_Audio
+  generated_visuals_data: # Nuevo: Para Servicio_GeneracionVisuales
   # redis_data: # Si decides persistir datos de Redis

@@ -1,0 +1,13 @@
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=0.20.0
+
+# Celery para la gestión de tareas asíncronas
+celery>=5.3.0 # O una versión reciente y estable
+redis>=4.5.0  # Cliente de Python para Redis (usado por Celery como broker/backend)
+
+# Cliente HTTP asíncrono para que las tareas de Celery llamen a otros servicios
+httpx>=0.20.0
+gevent>=23.0.0
